@@ -208,6 +208,10 @@ extension_services:
             search:
               - '{{{ DNS_SUFFIX }}}'
               - f5.com
+		  myLicense:
+			class: License
+			licenseType: regKey
+			regKey: '${regKey}'
           myNtp:
             class: NTP
             servers:

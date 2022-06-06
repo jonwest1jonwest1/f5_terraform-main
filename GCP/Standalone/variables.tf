@@ -72,7 +72,7 @@ variable "machine_type" {
 }
 variable "image_name" {
   type        = string
-  default     = "projects/f5-7626-networks-public/global/images/f5-bigip-16-1-2-2-0-0-28-payg-best-plus-1gbps-220505081153"
+  default     = "projects/f5-7626-networks-public/global/images/f5-bigip-16-1-2-1-0-0-10-byol-all-modules-1boot-loc-1222202155"
   description = "F5 SKU (image) to deploy. Note: The disk size of the VM will be determined based on the option you select.  **Important**: If intending to provision multiple modules, ensure the appropriate value is selected, such as ****AllTwoBootLocations or AllOneBootLocation****."
 }
 variable "customImage" {
@@ -102,7 +102,7 @@ variable "gcp_secret_manager_authentication" {
 }
 variable "license1" {
   type        = string
-  default     = ""
+  default     = "UWJZD-LMVYC-XEXQS-OVGBV-EXGTUPC"
   description = "The license token for the first F5 BIG-IP VE (BYOL)"
 }
 variable "adminSrcAddr" {
