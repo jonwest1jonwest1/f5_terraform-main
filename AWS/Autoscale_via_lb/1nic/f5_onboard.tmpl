@@ -1,0 +1,146 @@
+#!/bin/bash -x
+
+mkdir -p  /var/log/cloud /config/cloud /var/config/rest/downloads
+LOG_FILE=/var/log/cloud/startup-script.log
+[[ ! -f $LOG_FILE ]] && touch $LOG_FILE || { echo "Run Only Once. Exiting"; exit; }
+npipe=/tmp/$$.tmp
+trap "rm -f $npipe" EXIT
+mknod $npipe p
+tee <$npipe -a $LOG_FILE /dev/ttyS0 &
+exec 1>&-
+exec 1>$npipe
+exec 2>&1
+
+
+### write_files:
+# Download or Render BIG-IP Runtime Init Config
+cat << 'EOF' > /config/cloud/runtime-init-conf.yaml
+---
+runtime_parameters:
+  - name: HOST_NAME
+    type: metadata
+    metadataProvider:
+      environment: aws
+      type: compute
+      field: hostname
+  - name: REGION
+    type: url
+    value: http://169.254.169.254/latest/dynamic/instance-identity/document
+    query: region
+  - name: USER_NAME
+    type: static
+    value: ${f5_username}
+  - name: ADMIN_PASS
+    type: static
+    value: ${f5_password}
+  - name: SSH_KEYS
+    type: static
+    value: ${ssh_keypair}
+extension_packages:
+  install_operations:
+    - extensionType: do
+      extensionVersion: ${DO_VER}
+      extensionUrl: ${DO_URL}
+    - extensionType: as3
+      extensionVersion: ${AS3_VER}
+      extensionUrl: ${AS3_URL}
+extension_services:
+  service_operations:
+    - extensionType: do
+      type: inline
+      value:
+        schemaVersion: 1.0.0
+        class: Device
+        async: true
+        label: Onboard BIG-IP Autoscale
+        Common:
+          class: Tenant
+          dbVars:
+            class: DbVariables
+            restjavad.useextramb: true
+            provision.extramb: 1000
+            config.allow.rfc3927: enable
+            ui.advisory.enabled: true
+            ui.advisory.color: blue
+            ui.advisory.text: '{{{ HOST_NAME }}}'
+          mySystem:
+            autoPhonehome: true
+            class: System
+            hostname: '{{{ HOST_NAME }}}'
+          '{{{ USER_NAME }}}':
+            class: User
+            partitionAccess:
+              all-partitions:
+                role: admin
+            password: '{{{ ADMIN_PASS }}}'
+            shell: bash
+            userType: regular
+            keys:
+              - '{{{ SSH_KEYS }}}'
+          myProvisioning:
+            class: Provision
+            ltm: nominal
+    - extensionType: as3
+      type: inline
+      value:
+        class: AS3
+        action: deploy
+        persist: true
+        declaration:
+          class: ADC
+          schemaVersion: 3.0.0
+          label: Sample 1
+          remark: A HTTP sample application
+          Tenant_1:
+            class: Tenant
+            A1:
+              class: Application
+              template: http
+              serviceMain:
+                class: Service_HTTP
+                virtualAddresses:
+                  - 0.0.0.0/0
+                pool: web_pool
+              web_pool:
+                class: Pool
+                monitors:
+                  - tcp
+                members:
+                  - servicePort: 80
+                    addressDiscovery: fqdn
+                    autoPopulate: true
+                    hostname: httpbin.org
+    - extensionType: ts
+      type: inline
+      value:
+        class: Telemetry
+        My_System:
+          class: Telemetry_System
+          systemPoller:
+            interval: 60
+        My_Listener:
+          class: Telemetry_Listener
+          port: 6514
+        My_Consumer:
+          class: Telemetry_Consumer
+          type: AWS_CloudWatch
+          region: '{{{REGION}}}'
+          logGroup: f5telemetry
+          logStream: default
+post_onboard_enabled:
+  - name: misc
+    type: inline
+    commands:
+    - tmsh save sys config
+EOF
+
+# Download BIG-IP Runtime Init
+for i in {1..30}; do
+    curl -fv --retry 1 --connect-timeout 5 -L ${INIT_URL} -o "/var/config/rest/downloads/f5-bigip-runtime.gz.run" && break || sleep 10
+done
+
+# Install BIG-IP Runtime Init
+bash /var/config/rest/downloads/f5-bigip-runtime.gz.run -- '--cloud aws'
+
+# Run BIG-IP Runtime Init and Process YAML
+f5-bigip-runtime-init --config-file /config/cloud/runtime-init-conf.yaml
